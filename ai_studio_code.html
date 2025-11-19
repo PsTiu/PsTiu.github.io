@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>NEON OVERDRIVE: INFINITE</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            overflow: hidden;
+            font-family: 'Orbitron', sans-serif;
+            user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at center, #1a1a2e 0%, #000000 100%);
+        }
+
+        canvas {
+            display: block;
+            box-shadow: inset 0 0 100px rgba(0, 255, 255, 0.15);
+        }
+
+        /* UI 层 */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .score-box {
+            color: #00ffff;
+            font-size: 28px;
+            text-shadow: 0 0 10px #00ffff;
+            font-weight: 900;
+        }
+
+        .status-panel {
+            text-align: right;
+        }
+
+        /* 血条容器 */
+        .hp-frame {
+            width: 250px; height: 15px;
+            border: 2px solid #ff0055;
+            background: rgba(50, 0, 20, 0.5);
+            transform: skewX(-20deg);
+            margin-bottom: 8px;
+            position: relative;
+        }
+        .hp-fill { 
+            width: 100%; height: 100%; 
+            background: #ff0055; 
+            box-shadow: 0 0 20px #ff0055; 
+            transition: width 0.1s; 
+        }
+
+        /* 核心等级 */
+        .power-level {
+            font-size: 24px;
+            color: #ffff00;
+            text-shadow: 0 0 15px #ffff00;
+            font-weight: bold;
+        }
+        .power-sub { font-size: 12px; color: #aaa; letter-spacing: 2px; }
+
+        /* Boss 警告 */
+        #warning-msg {
+            position: absolute;
+            top: 40%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff0000;
+            font-size: 80px;
+            font-weight: 900;
+            display: none;
+            text-shadow: 4px 4px 0 #500, 0 0 30px #ff0000;
+            letter-spacing: 10px;
+            z-index: 15;
+            text-align: center;
+            animation: pulse 0.5s infinite;
+        }
+        @keyframes pulse { 0% {transform:translate(-50%,-50%) scale(1);} 50% {transform:translate(-50%,-50%) scale(1.1);} 100% {transform:translate(-50%,-50%) scale(1);} }
+
+        /* 菜单 */
+        #menu-layer {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 20;
+            background: rgba(0,0,0,0.9);
+            padding: 50px;
+            border: 2px solid #00ffff;
+            box-shadow: 0 0 80px rgba(0,255,255,0.3);
+            backdrop-filter: blur(10px);
+            clip-path: polygon(10% 0, 100% 0, 100% 90%, 90% 100%, 0 100%, 0 10%);
+            min-width: 300px;
+        }
+
+        h1 {
+            color: #fff; font-size: 48px; margin: 0 0 10px 0;
+            text-shadow: 4px 4px 0px #00ffff;
+            letter-spacing: 3px;
+            font-style: italic;
+        }
+
+        button {
+            background: linear-gradient(45deg, rgba(0,255,255,0.1), rgba(0,255,255,0.3));
+            color: #00ffff;
+            border: 2px solid #00ffff;
+            padding: 15px 50px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 25px;
+            transition: 0.2s;
+            text-transform: uppercase;
+        }
+        button:hover { background: #00ffff; color: #000; box-shadow: 0 0 40px #00ffff; transform: scale(1.05); }
+        
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui-layer" class="hidden">
+        <div class="hud-top">
+            <div class="score-box">SCORE: <span id="score">0</span></div>
+            <div class="status-panel">
+                <div class="hp-frame"><div class="hp-fill" id="hp-bar"></div></div>
+                <div class="power-level">CORE LV.<span id="lvl-num">1</span></div>
+                <div class="power-sub" id="fire-rate-txt">STATUS: NORMAL</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="warning-msg">WARNING<br><span style="font-size:30px; color:#fff;">BOSS APPROACHING</span></div>
+
+    <div id="menu-layer">
+        <h1>NEON OVERDRIVE</h1>
+        <p style="color:#888; margin-bottom:20px;">WASD / ARROW KEYS TO MOVE</p>
+        <p style="color:#00ffff; font-size:14px; line-height: 1.5;">
+            COLLECT <span style="color:#0f0">[UP]</span> TO STACK POWER<br>
+            LEVELS ARE INFINITE
+        </p>
+        <div id="final-score" style="display:none; color:#ff0055; font-size:24px; margin-top:20px;"></div>
+        <button id="start-btn" onclick="game.start()">ENGAGE SYSTEM</button>
+    </div>
+</div>
+
+<script>
+    // --- 全局配置 ---
+    const C = {
+        p: '#00ffff',    // 玩家青色
+        e: '#ff0055',    // 敌人红色
+        b: '#ffff00',    // 子弹黄色
+        item: '#00ff00', // 道具绿色
+        laser: '#d000ff' // 激光紫色
+    };
+
+    // --- 粒子特效 ---
+    class Particle {
+        constructor(x, y, color, speed, size=2) {
+            this.x = x; this.y = y; this.color = color; this.size = size;
+            const a = Math.random() * Math.PI * 2;
+            const v = Math.random() * speed + 0.5;
+            this.vx = Math.cos(a) * v;
+            this.vy = Math.sin(a) * v;
+            this.life = 1.0;
+            this.decay = Math.random() * 0.03 + 0.02;
+        }
+        update() {
+            this.x += this.vx; this.y += this.vy;
+            this.life -= this.decay;
+        }
+        draw(ctx) {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, this.life);
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 10; ctx.shadowColor = this.color;
+            ctx.fillRect(this.x, this.y, this.size, this.size);
+            ctx.restore();
+        }
+    }
+
+    // --- 道具 (UP) ---
+    class PowerUp {
+        constructor(x, y) {
+            this.x = x; this.y = y;
+            this.w = 30; this.h = 30;
+            this.vy = 2;
+            this.rot = 0;
+            this.marked = false;
+        }
+        update() {
+            this.y += this.vy;
+            this.rot += 0.05;
+            if(this.y > game.height) this.marked = true;
+        }
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x+15, this.y+15);
+            ctx.rotate(this.rot);
+            
+            ctx.strokeStyle = C.item;
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 15; ctx.shadowColor = C.item;
+            ctx.strokeRect(-15, -15, 30, 30);
+            
+            ctx.fillStyle = 'rgba(0,255,0,0.2)';
+            ctx.fillRect(-15, -15, 30, 30);
+            
+            ctx.rotate(-this.rot); 
+            ctx.fillStyle = '#fff';
+            ctx.font = "bold 14px Orbitron";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("UP", 0, 1);
+            ctx.restore();
+        }
+    }
+
+    // --- 子弹 ---
+    class Bullet {
+        constructor(x, y, vx, vy, type, dmg) {
+            this.x = x; this.y = y;
+            this.vx = vx; this.vy = vy;
+            this.type = type; // 'PLAYER', 'ENEMY', 'LASER'
+            this.dmg = dmg || 1;
+            this.marked = false;
+            this.w = 4; this.h = 10;
+            
+            if(type === 'LASER') { this.color = C.laser; this.w=6; this.h=40; }
+            else if(type === 'ENEMY') { this.color = '#fff'; this.w=8; this.h=8; }
+            else { this.color = C.b; }
+        }
+        update() {
+            this.x += this.vx; this.y += this.vy;
+            // 宽容的边界删除
+            if(this.x<-50 || this.x>game.width+50 || this.y<-50 || this.y>game.height+50) this.marked = true;
+        }
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(Math.atan2(this.vy, this.vx) + Math.PI/2);
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 10; ctx.shadowColor = this.color;
+            
+            if(this.type === 'ENEMY') {
+                ctx.beginPath(); ctx.arc(0,0,4,0,Math.PI*2); ctx.fill();
+            } else {
+                ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
+            }
+            ctx.restore();
+        }
+    }
+
+    // --- 玩家 ---
+    class Player {
+        constructor() {
+            this.w = 50; this.h = 60;
+            this.x = game.width/2 - 25;
+            this.y = game.height - 100;
+            this.vx = 0; this.vy = 0;
+            this.hp = 100;
+            this.level = 1; 
+        }
+
+        update(keys) {
+            const acc = 0.8;
+            const fric = 0.92;
+            
+            if(keys['w'] || keys['arrowup']) this.vy -= acc;
+            if(keys['s'] || keys['arrowdown']) this.vy += acc;
+            if(keys['a'] || keys['arrowleft']) this.vx -= acc;
+            if(keys['d'] || keys['arrowright']) this.vx += acc;
+
+            this.vx *= fric; this.vy *= fric;
+            this.x += this.vx; this.y += this.vy;
+            
+            this.x = Math.max(0, Math.min(game.width-this.w, this.x));
+            this.y = Math.max(0, Math.min(game.height-this.h, this.y));
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x+this.w/2, this.y+this.h/2);
+            ctx.rotate(this.vx * 0.05);
+
+            // 光环颜色随等级变化
+            const glowColor = this.level > 10 ? '#ff0000' : (this.level > 5 ? '#d000ff' : C.p);
+            ctx.shadowBlur = 15 + Math.min(this.level, 20); 
+            ctx.shadowColor = glowColor;
+            ctx.strokeStyle = glowColor;
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            ctx.moveTo(0, -30);
+            ctx.lineTo(20, 20);
+            ctx.lineTo(0, 10);
+            ctx.lineTo(-20, 20);
+            ctx.closePath();
+            ctx.stroke();
+
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            const flameLen = 20 + Math.min(this.level * 2, 40);
+            ctx.moveTo(-5, 20);
+            ctx.lineTo(0, 20 + flameLen + Math.random()*10);
+            ctx.lineTo(5, 20);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        shoot() {
+            const bullets = [];
+            const cx = this.x + this.w/2;
+            const cy = this.y;
+            // 伤害随等级无限增加
+            const dmg = 1 + (this.level * 0.2);
+
+            // Lv 1-4: 双发
+            bullets.push(new Bullet(cx-10, cy, 0, -15, 'PLAYER', dmg));
+            bullets.push(new Bullet(cx+10, cy, 0, -15, 'PLAYER', dmg));
+
+            // Lv 5+: 增加散射
+            if(this.level >= 5) {
+                bullets.push(new Bullet(cx-15, cy+5, -3, -14, 'PLAYER', dmg));
+                bullets.push(new Bullet(cx+15, cy+5, 3, -14, 'PLAYER', dmg));
+            }
+
+            // Lv 8+: 增加广角散射
+            if(this.level >= 8) {
+                bullets.push(new Bullet(cx-20, cy+10, -6, -13, 'PLAYER', dmg));
+                bullets.push(new Bullet(cx+20, cy+10, 6, -13, 'PLAYER', dmg));
+            }
+
+            // Lv 10+: 增加激光 (紫色)
+            if(this.level >= 10) {
+                bullets.push(new Bullet(cx, cy-10, 0, -25, 'LASER', dmg*2));
+            }
+
+            // Lv 15+: 暴走激光
+            if(this.level >= 15) {
+                bullets.push(new Bullet(cx-25, cy+10, -1, -20, 'LASER', dmg));
+                bullets.push(new Bullet(cx+25, cy+10, 1, -20, 'LASER', dmg));
+            }
+            
+            // Lv 25+: 弹幕覆盖
+            if(this.level >= 25) {
+                 bullets.push(new Bullet(cx, cy, -10, -5, 'PLAYER', dmg));
+                 bullets.push(new Bullet(cx, cy, 10, -5, 'PLAYER', dmg));
+            }
+
+            return bullets;
+        }
+    }
+
+    // --- 敌人 & Boss ---
+    class Enemy {
+        constructor(gameW, difficulty) {
+            this.w = 40; this.h = 40;
+            this.x = Math.random() * (gameW - this.w);
+            this.y = -50;
+            this.hp = 3 * difficulty; 
+            this.speed = 2 + Math.random() * 3 + (difficulty * 0.5);
+            this.marked = false;
+        }
+        update() {
+            this.y += this.speed;
+            if(this.y > game.height) this.marked = true;
+        }
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x+20, this.y+20);
+            ctx.strokeStyle = C.e;
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 10; ctx.shadowColor = C.e;
+            ctx.strokeRect(-15, -15, 30, 30);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(-5, -5, 10, 10);
+            ctx.restore();
+        }
+    }
+
+    class Boss {
+        constructor(w) {
+            this.w = 200; this.h = 150;
+            this.x = w/2 - 100; this.y = -200;
+            this.hp = 3000; this.maxHp = 3000;
+            this.state = 'enter';
+            this.marked = false;
+            this.frame = 0;
+        }
+        update() {
+            this.frame++;
+            if(this.state==='enter') {
+                this.y+=2;
+                if(this.y>50) this.state='fight';
+            } else {
+                this.x += Math.sin(this.frame/60)*4;
+            }
+        }
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x+100, this.y+75);
+            ctx.shadowBlur = 30; ctx.shadowColor = '#ff0000';
+            ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 4;
+            
+            ctx.beginPath();
+            ctx.moveTo(0, 70);
+            ctx.lineTo(90, -30);
+            ctx.lineTo(50, -70);
+            ctx.lineTo(-50, -70);
+            ctx.lineTo(-90, -30);
+            ctx.closePath();
+            ctx.stroke();
+            
+            ctx.fillStyle = `rgba(255,0,0,${0.5+Math.sin(this.frame/10)*0.5})`;
+            ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    // --- 游戏主控制器 ---
+    class Game {
+        constructor() {
+            this.canvas = document.getElementById('gameCanvas');
+            this.ctx = this.canvas.getContext('2d');
+            this.resize();
+            window.addEventListener('resize', () => this.resize());
+            
+            this.keys = {};
+            window.addEventListener('keydown', e => this.keys[e.key.toLowerCase()] = true);
+            window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
+            
+            this.state = 'MENU';
+        }
+
+        resize() {
+            this.width = this.canvas.width = window.innerWidth;
+            this.height = this.canvas.height = window.innerHeight;
+        }
+
+        start() {
+            this.player = new Player();
+            this.bullets = [];
+            this.enemies = [];
+            this.items = [];
+            this.particles = [];
+            this.boss = null;
+            this.score = 0;
+            this.frame = 0;
+            this.difficulty = 1;
+            this.isBossSpawning = false;
+            
+            document.getElementById('menu-layer').classList.add('hidden');
+            document.getElementById('ui-layer').classList.remove('hidden');
+            document.getElementById('warning-msg').style.display = 'none';
+            this.state = 'PLAYING';
+            this.loop();
+        }
+
+        spawnExplosion(x, y, color, count=10) {
+            for(let i=0; i<count; i++) this.particles.push(new Particle(x, y, color, 5));
+        }
+
+        update() {
+            this.frame++;
+            this.difficulty = 1 + (this.score / 5000); 
+
+            // 1. 玩家
+            this.player.update(this.keys);
+            
+            // 射速 (等级越高射速越快)
+            let fireRate = 10;
+            if(this.player.level >= 10) fireRate = 8;
+            if(this.player.level >= 20) fireRate = 5;
+            
+            if(this.frame % fireRate === 0) {
+                this.bullets.push(...this.player.shoot());
+            }
+
+            // 2. 敌人生成
+            // 只有在 Boss 不存在 且 没有在警告期间 才生成小怪
+            if(!this.boss && !this.isBossSpawning) {
+                if(Math.random() < 0.03 * this.difficulty) {
+                    this.enemies.push(new Enemy(this.width, this.difficulty));
+                }
+                // 召唤 Boss (分数阈值)
+                if(this.score > 2000 && this.score % 2000 < 100 && this.enemies.length < 3) {
+                    this.spawnBoss();
+                }
+            } 
+            // Boss 逻辑
+            else if(this.boss) {
+                this.boss.update();
+                // Boss 弹幕
+                if(this.frame % 60 === 0) {
+                    const cx = this.boss.x + this.boss.w/2;
+                    const cy = this.boss.y + this.boss.h;
+                    for(let i=0; i<12; i++) {
+                        const angle = (Math.PI*2/12)*i + this.frame/50;
+                        this.bullets.push(new Bullet(cx, cy, Math.cos(angle)*5, Math.sin(angle)*5, 'ENEMY'));
+                    }
+                }
+            }
+
+            // 3. 更新所有实体
+            this.bullets.forEach(e => e.update());
+            this.enemies.forEach(e => e.update());
+            this.items.forEach(e => e.update());
+            this.particles.forEach(e => e.update());
+
+            // 清理标记删除的实体
+            this.bullets = this.bullets.filter(e => !e.marked);
+            this.enemies = this.enemies.filter(e => !e.marked);
+            this.items = this.items.filter(e => !e.marked);
+            this.particles = this.particles.filter(e => e.life > 0);
+
+            this.checkCollisions();
+            this.updateUI();
+        }
+
+        spawnBoss() {
+            this.isBossSpawning = true;
+            const w = document.getElementById('warning-msg');
+            w.style.display = 'block';
+            
+            setTimeout(() => {
+                if(this.state === 'PLAYING') { // 防止游戏结束后还在生成
+                    w.style.display = 'none';
+                    this.boss = new Boss(this.width);
+                    this.isBossSpawning = false;
+                }
+            }, 3000);
+        }
+
+        checkCollisions() {
+            const rect = (r1, r2) => r1.x < r2.x+r2.w && r1.x+r1.w > r2.x && r1.y < r2.y+r2.h && r1.y+r1.h > r2.y;
+            const pRect = {x:this.player.x+15, y:this.player.y+15, w:this.player.w-30, h:this.player.h-30};
+
+            // 子弹碰撞
+            this.bullets.forEach(b => {
+                if(b.marked) return;
+                const bRect = {x:b.x, y:b.y, w:b.w, h:b.h};
+
+                if(b.type === 'ENEMY') {
+                    // 敌人子弹打玩家
+                    if(rect(bRect, pRect)) {
+                        b.marked = true; this.hitPlayer(10);
+                    }
+                } else {
+                    // 玩家子弹打怪
+                    this.enemies.forEach(e => {
+                        if(!e.marked && rect(bRect, {x:e.x,y:e.y,w:e.w,h:e.h})) {
+                            b.marked = true;
+                            e.hp -= b.dmg;
+                            this.spawnExplosion(b.x, b.y, '#fff', 2);
+                            if(e.hp <= 0) {
+                                e.marked = true;
+                                this.score += 100;
+                                this.spawnExplosion(e.x+20, e.y+20, C.e, 15);
+                                if(Math.random() < 0.2) this.items.push(new PowerUp(e.x, e.y));
+                            }
+                        }
+                    });
+                    // 玩家子弹打 Boss
+                    if(this.boss && rect(bRect, {x:this.boss.x, y:this.boss.y, w:this.boss.w, h:this.boss.h})) {
+                        b.marked = true;
+                        this.boss.hp -= b.dmg;
+                        this.spawnExplosion(b.x, b.y, '#fff', 1);
+                        if(this.boss.hp <= 0) {
+                            this.boss.marked = true;
+                            this.score += 5000;
+                            this.spawnExplosion(this.boss.x+100, this.boss.y+75, '#f00', 100);
+                            // Boss 掉落 3 个道具
+                            for(let i=0; i<3; i++) this.items.push(new PowerUp(this.boss.x+50*i, this.boss.y));
+                            this.boss = null;
+                        }
+                    }
+                }
+            });
+
+            // 道具碰撞
+            this.items.forEach(i => {
+                if(!i.marked && rect({x:i.x,y:i.y,w:30,h:30}, pRect)) {
+                    i.marked = true;
+                    this.player.level++; // 核心叠加
+                    this.score += 50;
+                    // 少量回血
+                    this.player.hp = Math.min(100, this.player.hp + 10);
+                }
+            });
+
+            // 玩家撞怪
+            this.enemies.forEach(e => {
+                if(!e.marked && rect({x:e.x,y:e.y,w:e.w,h:e.h}, pRect)) {
+                    e.marked = true;
+                    this.hitPlayer(20);
+                    this.spawnExplosion(e.x, e.y, C.e, 10);
+                }
+            });
+        }
+
+        hitPlayer(dmg) {
+            this.player.hp -= dmg;
+            this.spawnExplosion(this.player.x+25, this.player.y+30, C.p, 10);
+            // 震动
+            const dx = Math.random()*10-5; const dy = Math.random()*10-5;
+            this.ctx.translate(dx, dy);
+            setTimeout(()=>this.ctx.setTransform(1,0,0,1,0,0), 50);
+            
+            if(this.player.hp <= 0) this.gameOver();
+        }
+
+        gameOver() {
+            this.state = 'GAMEOVER';
+            document.getElementById('ui-layer').classList.add('hidden');
+            document.getElementById('menu-layer').classList.remove('hidden');
+            
+            const fs = document.getElementById('final-score');
+            fs.style.display = 'block';
+            fs.innerText = `FINAL SCORE: ${this.score} (LV.${this.player.level})`;
+            
+            // 更新按钮文字
+            const btn = document.querySelector('#menu-layer button');
+            btn.innerText = "REBOOT SYSTEM";
+        }
+
+        updateUI() {
+            document.getElementById('score').innerText = this.score;
+            document.getElementById('hp-bar').style.width = Math.max(0, this.player.hp) + '%';
+            document.getElementById('lvl-num').innerText = this.player.level;
+            
+            let status = "NORMAL";
+            if(this.player.level >= 5) status = "SPREAD";
+            if(this.player.level >= 10) status = "LASER ACTIVE";
+            if(this.player.level >= 15) status = "OVERDRIVE";
+            document.getElementById('fire-rate-txt').innerText = "STATUS: " + status;
+        }
+
+        drawBg() {
+            // 清空画布
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(0,0,this.width,this.height);
+            
+            // 赛博网格
+            this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.15)';
+            this.ctx.lineWidth = 1;
+            this.ctx.shadowBlur = 0; // 优化性能
+
+            this.ctx.beginPath();
+            // 纵向
+            for(let x=0; x<=this.width; x+=100) {
+                this.ctx.moveTo(x, 0); this.ctx.lineTo(x, this.height);
+            }
+            // 横向滚动
+            const offset = (this.frame * 2) % 60;
+            for(let y=offset; y<this.height; y+=60) {
+                this.ctx.moveTo(0, y); this.ctx.lineTo(this.width, y);
+            }
+            this.ctx.stroke();
+        }
+
+        loop() {
+            if(this.state !== 'PLAYING') return;
+
+            this.drawBg();
+            this.update();
+
+            // 绘制层级 (Z-Index)
+            this.items.forEach(e => e.draw(this.ctx));
+            if(this.boss) this.boss.draw(this.ctx);
+            this.enemies.forEach(e => e.draw(this.ctx));
+            this.player.draw(this.ctx);
+            this.bullets.forEach(e => e.draw(this.ctx));
+            this.particles.forEach(e => e.draw(this.ctx));
+
+            requestAnimationFrame(() => this.loop());
+        }
+    }
+
+    const game = new Game();
+</script>
+</body>
+</html>
